@@ -1,0 +1,18 @@
+pr: none
+trigger:
+  - main
+pool:
+  vmImage: ubuntu-latest
+extends:
+  template: templates/azure-pipeline-step-deploy-appcode-release.yml
+  parameters:
+    environments: ${{ parameters.environments }}
+parameters:
+  - name: environments
+    type: object
+    default:
+      - environmentName: preprod
+        approvalNamePrefix: AppCode_
+        pool_name: EE-WINDOWS-NONPROD # should be prod vm
+        variableGroupName: Common-AppBuild-Publish-Feed
+        azDeployVariableGroupName: spn-netzero-appdev-deploy-prod

@@ -1,0 +1,49 @@
+# File: steps/azure-pipeline-step-deploy.yml
+
+parameters:
+  - name: environments
+    type: object
+stages:
+  - ${{each environment in parameters.environments}}:
+      - stage: Code_Build_${{ environment.environmentName }}
+        displayName: Code_Build_${{ environment.environmentName }}
+        condition: startsWith(variables['Build.SourceBranchName'], 'develop')
+        # build  on commit to develop branch should be built and then deployed into dev environment.
+        jobs:
+          - deployment: Code_Build_${{ environment.environmentName }}
+            displayName: Code_Build_${{ environment.environmentName }}
+            environment: "${{ environment.approvalNamePrefix }}Deploy_${{ environment.environmentName }}"
+            pool:
+              # vmImage: ubuntu-latest
+              name: ${{ environment.pool_name }}
+            variables:
+              - template: ../../variables/pipeline-variables-${{ environment.environmentName }}.yml
+              - template: ../../variables/pipeline-variables-common.yml
+              - group: ${{ environment.azDeployVariableGroupName }} # maps ARM vars for deploy.
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                    - script: dotnet build --configuration $(buildConfiguration)
+                      displayName: "dotnet build $(buildConfiguration)"
+                    - task: DotNetCoreCLI@2
+                      inputs:
+                        command: "publish"
+                        publishWebProjects: true
+                    - pwsh: |
+                        dir env:
+                        az login --service-principal -u "$ENV:ARM_CLIENT_ID" -p "$ENV:ARM_CLIENT_SECRET" --tenant "$ENV:ARM_TENANT_ID"
+                        az account set -s "$ENV:webAppSubId"
+                        $PackageFileFullPathName = (get-childitem $env:SYSTEM_DEFAULTWORKINGDIRECTORY -recurse *.zip | Select VersionInfo).VersionInfo.Filename
+                        az webapp deploy --resource-group "$env:webAppRGName" --name "$env:webAppName" --src-path "$PackageFileFullPathName" --only-show-errors
+                        az logout
+                      env:
+                        ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET) # secure variables must be mapped explicitly.
+                      failOnStderr: true
+                    # - task: AzureWebApp@1
+                    #   inputs:
+                    #     azureSubscription: ${{ environment.serviceConnectionName }}
+                    #     appType: "webAppLinux"
+                    #     appName: $(webAppName)
+                    #     package: "$(System.DefaultWorkingDirectory)/**/*.zip"

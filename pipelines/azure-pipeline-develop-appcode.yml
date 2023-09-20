@@ -1,0 +1,27 @@
+pr: none 
+trigger:
+  branches:
+    include:
+      - develop
+  paths:
+    exclude:
+      - NZEJobServices-iac/*
+      - scripts/*
+      - variables/*
+      - pipelines/**-iac**
+      - pipelines/templates/**-iac**
+pool:
+  vmImage: ubuntu-latest
+extends:
+  template: templates/azure-pipeline-step-deploy-appcode-develop.yml
+  parameters:
+    environments: ${{ parameters.environments }}
+parameters:
+  - name: environments
+    type: object
+    default:
+      - environmentName: dev
+        approvalNamePrefix: AppCode_
+        pool_name: EE-WINDOWS-NONPROD
+        variableGroupName: Common-AppBuild-Publish-Feed
+        azDeployVariableGroupName: spn-netzero-appdev-deploy-nonprod

@@ -1,0 +1,9 @@
+variables: 
+# For IAC
+  backendAzureRmResourceGroupName: "RG-PLATFORM-DEVOPS-AAE-NONPROD"
+  backendAzureRmStorageAccountName: "steenonprodtfstate01"
+  backendAzureRmContainerName: "tfstate"
+  backendAzureRmKey: "terraform.tfstate"
+  webAppName: "app-nz-nzejobservices-stc-dev-aae"
+  webAppRGName: "rg-netzero-nonprod-stc-dev-aae"
+  webAppSubId: "db3a7319-e4d7-4d72-afd9-f23cb2f79c5b"

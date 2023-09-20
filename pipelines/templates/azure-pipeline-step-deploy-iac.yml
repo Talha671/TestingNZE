@@ -1,0 +1,96 @@
+# File: steps/azure-pipeline-step-deploy.yml
+
+parameters:
+  - name: environments
+    type: object
+stages:
+  - ${{each environment in parameters.environments}}:
+      - stage: Terraform_Plan_${{ environment.environmentName }}
+        displayName: Terraform_Plan_${{ environment.environmentName }}
+        condition: not(or(failed(), canceled())) # nonprod apply skip shouldnt skip dev.
+        jobs:
+          - deployment: Terraform_Plan_${{ environment.environmentName }}
+            displayName: Terraform_Plan_${{ environment.environmentName }}
+            environment: "${{ environment.approvalNamePrefix }}Plan_${{ environment.environmentName }}"
+            pool:
+              # vmImage: ubuntu-latest
+              name: ${{ environment.pool_name }}
+            variables:
+              - template: ../../variables/pipeline-variables-${{ environment.environmentName }}.yml
+              - group: ${{ environment.variableGroupName }}
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                    - task: TerraformInstaller@1
+                      displayName: Install Terraform
+                      inputs:
+                        terraformVersion: 1.4.2
+                        failOnStderr: true
+
+                    - pwsh:
+                        $(Build.SourcesDirectory)/scripts/Terraform-Deployment-Plan-Or-Apply.ps1 `
+                        -environmentName ${{ environment.environmentName }} `
+                        -Plan_Or_Apply Plan `
+                        -TFWORKSPACE ${{ environment.TFWORKSPACE}} `
+                        -pool_name ${{ environment.pool_name }}
+                      workingDirectory: "$(Agent.BuildDirectory)"
+                      displayName: "PowerShell-Terraform-Plan"
+                      name: "PowerShell_Terraform_Plan"
+                      failOnStderr: true
+                      env:
+                        ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET) # Encrypted vars Need to be mapped explicitly.
+                        TF_VAR_admin_password: $(TF_VAR_admin_password) # Encrypted vars Need to be mapped explicitly.
+                        TF_VAR_admin_username: $(TF_VAR_admin_username)
+
+                    - task: PublishBuildArtifacts@1
+                      inputs:
+                        pathToPublish: "$(Build.ArtifactStagingDirectory)"
+                        artifactName: tfArtifact
+
+      - stage: Terraform_Apply_${{ environment.environmentName }}
+        displayName: Terraform_Apply_${{ environment.environmentName }}
+        condition: and(succeeded(), or(eq(variables['Build.Reason'], 'IndividualCI'), eq(variables['Build.Reason'], 'Manual'))) # only on merge/commit run apply or on a manual apply
+        jobs:
+          - deployment: Terraform_Apply_${{ environment.environmentName }}
+            displayName: Terraform_Apply_${{ environment.environmentName }}
+            environment: "${{ environment.approvalNamePrefix }}Apply_${{ environment.environmentName }}"
+            pool:
+              # vmImage: ubuntu-latest
+              name: ${{ environment.pool_name }}
+            variables:
+              - template: ../../variables/pipeline-variables-${{ environment.environmentName }}.yml
+              - group: ${{ environment.variableGroupName }}
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                    - task: DownloadBuildArtifacts@0
+                      inputs:
+                        buildType: "current"
+                        downloadType: "single"
+                        artifactName: "tfArtifact"
+                        downloadPath: "$(System.ArtifactsDirectory)"
+
+                    - task: TerraformInstaller@1
+                      displayName: Install Terraform
+                      inputs:
+                        terraformVersion: 1.4.2
+                        failOnStderr: true
+
+                    - pwsh:
+                        $(Build.SourcesDirectory)/scripts/Terraform-Deployment-Plan-Or-Apply.ps1 `
+                        -environmentName ${{ environment.environmentName }} `
+                        -Plan_Or_Apply Apply `
+                        -TFWORKSPACE ${{ environment.TFWORKSPACE}} `
+                        -pool_name ${{ environment.pool_name }}
+                      workingDirectory: "$(Agent.BuildDirectory)"
+                      displayName: "PowerShell-Terraform-Apply"
+                      name: "PowerShell_Terraform_Apply"
+                      failOnStderr: true
+                      env:
+                        ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET) # Encrypted vars Need to be mapped explicitly.
+                        TF_VAR_admin_password: $(TF_VAR_admin_password) # Encrypted vars Need to be mapped explicitly.
+                        TF_VAR_admin_username: $(TF_VAR_admin_username)

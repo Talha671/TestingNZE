@@ -1,0 +1,117 @@
+# File: steps/azure-pipeline-step-deploy.yml
+
+parameters:
+  - name: environments
+    type: object
+stages:
+  - ${{each environment in parameters.environments}}:
+      - stage: Code_Build_${{ environment.environmentName }}
+        displayName: Code_Build_${{ environment.environmentName }}
+        condition: startsWith(variables['Build.SourceBranch'], 'refs/heads/release') # should be refs/heads/release
+        # build  on commit to release/v branch and then deployed into test environment.
+        # All future deployments into preprod, prod etc will be using this version via azure devops artifact feed.
+        jobs:
+          - deployment: Code_Build_${{ environment.environmentName }}
+            displayName: Code_Build_${{ environment.environmentName }}
+            environment: "${{ environment.approvalNamePrefix }}Deploy_${{ environment.environmentName }}"
+            pool:
+              # vmImage: ubuntu-latest
+              name: ${{ environment.pool_name }}
+            variables:
+              - template: ../../variables/pipeline-variables-${{ environment.environmentName }}.yml
+              - template: ../../variables/pipeline-variables-common.yml
+              - group: ${{ environment.variableGroupName }} # maps PAT
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                    - script: dotnet build --configuration $(buildConfiguration)
+                      displayName: "dotnet build --configuration $(buildConfiguration)"
+                    - task: DotNetCoreCLI@2
+                      inputs:
+                        command: "publish"
+                        publishWebProjects: true
+                    - pwsh: |
+                        dir env:
+                        $version = $env:BUILD_SOURCEBRANCHNAME ; $version = $version -split "v"; $version = $version[1]
+
+                        $PackageFileFullPathName = (get-childitem $env:SYSTEM_DEFAULTWORKINGDIRECTORY -recurse *.zip | Select VersionInfo).VersionInfo.Filename
+                        if((nuget sources list | Select-String "$env:feedUrl" | measure).count -eq 0)
+                        {
+                          nuget sources add -name "$env:azDevOpsFeedName" -source "$env:feedUrl" -username anynotnull -password $env:PAT
+                        }                          
+                        echo  "$env:PAT" | az devops login --organization "$env:azDevOpsOrganizationUrl"
+                        az artifacts universal publish `
+                        --organization "$env:azDevOpsOrganizationUrl" `
+                        --project="$env:azDevOpsProjectName" `
+                        --scope project `
+                        --feed "$env:azDevOpsFeedName" `
+                        --name "$env:azDevOpsPackageName" `
+                        --version $version `
+                        --description "$env:azDevOpsFeedName Version $version" `
+                        --path $PackageFileFullPathName `
+                        --only-show-errors
+                      env:
+                        PAT: $(PAT) # secure variables must be mapped explicitly.
+  # https://learn.microsoft.com/en-au/azure/devops/cli/log-in-via-pat?view=azure-devops&tabs=windows#pipe-pat-on-stdin-to-az-devops-login
+  - ${{each environment in parameters.environments}}:
+      - stage: Code_Deploy_${{ environment.environmentName }}
+        displayName: Code_Deploy_${{ environment.environmentName }}
+        condition: not(or(failed(), canceled()))
+        # All future deployments into preprod, prod etc will be using this version via azure devops artifact feed.
+        jobs:
+          - deployment: Code_Deploy_${{ environment.environmentName }}
+            displayName: Code_Deploy_${{ environment.environmentName }}
+            environment: "${{ environment.approvalNamePrefix }}Deploy_${{ environment.environmentName }}"
+            pool:
+              # vmImage: ubuntu-latest
+              name: ${{ environment.pool_name }}
+            variables:
+              - template: ../../variables/pipeline-variables-${{ environment.environmentName }}.yml
+              - template: ../../variables/pipeline-variables-common.yml
+              - group: ${{ environment.azDeployVariableGroupName }} # maps ARM vars for deploy.
+              - group: ${{ environment.variableGroupName }} # maps PAT
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - checkout: self
+                    - pwsh: |
+                        dir env:
+                        # Commit on main will use the latest version that was just uploaded into artifact
+                        if($version = $env:BUILD_SOURCEBRANCHNAME -eq "main")
+                        {
+                          $version = '*.*.*' # for latest version
+                        }else
+                        {
+                          $version = $env:BUILD_SOURCEBRANCHNAME ; $version = $version -split "v"; $version = $version[1]
+                          # for release branch and git release tag.
+                        }
+                          
+
+                        if((nuget sources list | Select-String "$env:feedUrl" | measure).count -eq 0)
+                        {
+                          nuget sources add -name "$env:azDevOpsFeedName" -source "$env:feedUrl" -username anynotnull -password $env:PAT
+                        } 
+
+                        echo  "$env:PAT" | az devops login --organization "$env:azDevOpsOrganizationUrl"                      
+                        az artifacts universal download `
+                        --organization "$env:azDevOpsOrganizationUrl" `
+                        --project="$env:azDevOpsProjectName" `
+                        --scope project `
+                        --feed "$env:azDevOpsFeedName" `
+                        --name "$env:azDevOpsPackageName" `
+                        --version $version `
+                        --path "$env:SYSTEM_DEFAULTWORKINGDIRECTORY" `
+                        --only-show-errors
+
+                        az login --service-principal -u "$ENV:ARM_CLIENT_ID" -p "$ENV:ARM_CLIENT_SECRET" --tenant "$ENV:ARM_TENANT_ID"
+                        az account set -s "$ENV:WEBAPPSUBID"
+                        az webapp deploy --resource-group "$env:WEBAPPRGNAME" --name "$env:WEBAPPNAME" --src-path "$(System.DefaultWorkingDirectory)/publish.zip" --only-show-errors
+                        az logout
+
+                      env:
+                        PAT: $(PAT) # secure variables must be mapped explicitly.
+                        ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET) # secure variables must be mapped explicitly.
+                      failOnStderr: true

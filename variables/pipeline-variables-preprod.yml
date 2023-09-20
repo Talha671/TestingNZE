@@ -1,0 +1,8 @@
+variables: 
+  backendAzureRmResourceGroupName: "RG-PLATFORM-DEVOPS-AAE-PROD"
+  backendAzureRmStorageAccountName: "steeprodtfstate01"
+  backendAzureRmContainerName: "tfstate"
+  backendAzureRmKey: "terraform.tfstate"
+  webAppName: "app-nz-nzejobservices-stc-preprod-aae"
+  webAppRGName: "rg-netzero-prod-stc-preprod-aae"
+  webAppSubId: "c1425426-f14a-4c74-82de-f2fa048d503d"

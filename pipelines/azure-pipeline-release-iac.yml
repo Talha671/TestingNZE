@@ -1,0 +1,20 @@
+pr:
+  - release/v*
+trigger:
+  - release/v*
+pool:
+  vmImage: ubuntu-latest
+extends:
+  template: templates/azure-pipeline-step-deploy-iac.yml
+  parameters:
+    environments: ${{ parameters.environments }}
+parameters:
+  - name: environments
+    type: object
+    default:
+      - environmentName: test
+        approvalNamePrefix: EE_Terraform_
+        variableGroupName: NZEPlatformServices-nonprod
+        skip_checkov_check: CKV_AZURE_183 # add more with comma.
+        TFWORKSPACE: NZEJobServices-iac
+        pool_name: EE-WINDOWS-NONPROD
